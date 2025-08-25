@@ -126,14 +126,26 @@ public class EventManager extends Mod {
             SPacketPlayerListItem packet = event.getPacket();
             if (SPacketPlayerListItem.Action.ADD_PLAYER != packet.getAction() && SPacketPlayerListItem.Action.REMOVE_PLAYER != packet.getAction())
                 return;
-            packet.getEntries().stream().filter(Objects::nonNull).filter(data -> (!Strings.isNullOrEmpty(data.getProfile().getName()) || data.getProfile().getId() != null))
-                    .forEach(data -> {
+            try {
+                // Use reflection to access entries to avoid AddPlayerData class loading issues
+                java.lang.reflect.Method getEntriesMethod = packet.getClass().getMethod("getEntries");
+                java.util.List<?> entries = (java.util.List<?>) getEntriesMethod.invoke(packet);
+                
+                for (Object data : entries) {
+                    if (data == null) continue;
+                    try {
+                        // Use reflection to access profile
+                        java.lang.reflect.Method getProfileMethod = data.getClass().getMethod("getProfile");
+                        com.mojang.authlib.GameProfile profile = (com.mojang.authlib.GameProfile) getProfileMethod.invoke(data);
+                        
+                        if (profile == null || (Strings.isNullOrEmpty(profile.getName()) && profile.getId() == null)) continue;
+                        
                         String name;
                         EntityPlayer entity;
-                        UUID id = data.getProfile().getId();
+                        UUID id = profile.getId();
                         switch (packet.getAction()) {
                             case ADD_PLAYER:
-                                name = data.getProfile().getName();
+                                name = profile.getName();
                                 MinecraftForge.EVENT_BUS.post(new ConnectionEvent(0, id, name));
                                 break;
                             case REMOVE_PLAYER:
@@ -146,7 +158,13 @@ public class EventManager extends Mod {
                                 MinecraftForge.EVENT_BUS.post(new ConnectionEvent(2, id, null));
                                 break;
                         }
-                    });
+                    } catch (Exception e) {
+                        // Handle any exceptions from reflection
+                    }
+                }
+            } catch (Exception e) {
+                // Handle any exceptions from packet processing
+            }
         }
 
         if (event.getPacket() instanceof net.minecraft.network.play.server.SPacketTimeUpdate) Managers.SERVER.update();
